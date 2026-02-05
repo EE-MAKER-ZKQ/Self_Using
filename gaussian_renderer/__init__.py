@@ -2344,79 +2344,79 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 #         # 应用到 opacity
 #         opacity = opacity * compensation.unsqueeze(-1)
 #2-2 SH
-#     if is_train and iteration is not None: #and iteration >= 500:
-#         num_points = means3D.shape[0]
-#         device = means3D.device
-#         progress = min(iteration / 10000.0, 1.0)
+    if is_train and iteration is not None: #and iteration >= 500:
+        num_points = means3D.shape[0]
+        device = means3D.device
+        progress = min(iteration / 10000.0, 1.0)
 
-#         # === 场景范围 ===
-#         q_max = torch.quantile(means3D, 0.98, dim=0)
-#         q_min = torch.quantile(means3D, 0.02, dim=0)
-#         scene_dims = (q_max - q_min).clamp(min=1e-6)
-#         scene_extent = scene_dims.max()
-#         scene_volume = scene_dims.prod()
+        # === 场景范围 ===
+        q_max = torch.quantile(means3D, 0.98, dim=0)
+        q_min = torch.quantile(means3D, 0.02, dim=0)
+        scene_dims = (q_max - q_min).clamp(min=1e-6)
+        scene_extent = scene_dims.max()
+        scene_volume = scene_dims.prod()
 
-#         # === 自适应体素大小 ===
-#         target_points_per_voxel = 20
-#         current_density = num_points / (scene_volume + 1e-6)
-#         adaptive_voxel_size = (target_points_per_voxel / (current_density + 1e-6)) ** (1/3)
+        # === 自适应体素大小 ===
+        target_points_per_voxel = 20
+        current_density = num_points / (scene_volume + 1e-6)
+        adaptive_voxel_size = (target_points_per_voxel / (current_density + 1e-6)) ** (1/3)
 
-#         surface_factor = 1.0
-#         voxel_size = adaptive_voxel_size * surface_factor
-#         voxel_size = torch.clamp(voxel_size, 
-#                                  scene_extent * 0.01, 
-#                                  scene_extent * 0.1)
+        surface_factor = 1.0
+        voxel_size = adaptive_voxel_size * surface_factor
+        voxel_size = torch.clamp(voxel_size, 
+                                 scene_extent * 0.01, 
+                                 scene_extent * 0.1)
 
-#         # === 自适应 drop 参数 ===
-#         if iteration < 7000:
-#             adj_progress = progress * 0.6
-#         else:
-#             adj_progress = progress
+        # === 自适应 drop 参数 ===
+        if iteration < 7000:
+            adj_progress = progress * 0.6
+        else:
+            adj_progress = progress
 
-#         voxel_select_ratio = 0.25 * adj_progress
-#         inner_drop_rate = 0.4 + 0.4 * adj_progress
+        voxel_select_ratio = 0.25 * adj_progress
+        inner_drop_rate = 0.4 + 0.4 * adj_progress
 
-#         # === 体素化 ===
-#         shifted_xyz = means3D - q_min
-#         voxel_coords = (shifted_xyz / voxel_size).int()
-#         unique_voxels, inverse_indices = torch.unique(voxel_coords, dim=0, return_inverse=True)
-#         num_voxels = unique_voxels.shape[0]
+        # === 体素化 ===
+        shifted_xyz = means3D - q_min
+        voxel_coords = (shifted_xyz / voxel_size).int()
+        unique_voxels, inverse_indices = torch.unique(voxel_coords, dim=0, return_inverse=True)
+        num_voxels = unique_voxels.shape[0]
 
-#         # === 密度筛选 ===
-#         counts = torch.bincount(inverse_indices, minlength=num_voxels)
-#         dense_threshold = torch.quantile(counts.float(), 0.8).item()
-#         dense_threshold = max(dense_threshold, 10)
+        # === 密度筛选 ===
+        counts = torch.bincount(inverse_indices, minlength=num_voxels)
+        dense_threshold = torch.quantile(counts.float(), 0.8).item()
+        dense_threshold = max(dense_threshold, 10)
 
-#         is_dense = counts >= dense_threshold
-#         is_selected = torch.rand(num_voxels, device=device) < voxel_select_ratio
-#         target_voxels = is_dense & is_selected
+        is_dense = counts >= dense_threshold
+        is_selected = torch.rand(num_voxels, device=device) < voxel_select_ratio
+        target_voxels = is_dense & is_selected
 
-#         # === 映射到点 + drop mask ===
-#         points_in_target = target_voxels[inverse_indices]
-#         inner_rand = torch.rand(num_points, device=device)
-#         drop_mask = points_in_target & (inner_rand < inner_drop_rate)
+        # === 映射到点 + drop mask ===
+        points_in_target = target_voxels[inverse_indices]
+        inner_rand = torch.rand(num_points, device=device)
+        drop_mask = points_in_target & (inner_rand < inner_drop_rate)
 
-#         # === 【关键】调用SH限制函数，传入drop的点索引 ===
-#         if iteration < 6000:
-#             drop_indices = torch.where(drop_mask)[0]
-#             if len(drop_indices) > 0:
-#                 # 对被drop的点同时限制SH阶数
-#                 pc.restrict_sh_degree_by_points(
-#                     iteration, 
-#                     selected_indices=drop_indices,
-#                     random_pct=0.0  # 不使用随机，直接用传入的索引
-#                 )
-#             else: print("error!!!")
+        # === 【关键】调用SH限制函数，传入drop的点索引 ===
+        if iteration < 6000:
+            drop_indices = torch.where(drop_mask)[0]
+            if len(drop_indices) > 0:
+                # 对被drop的点同时限制SH阶数
+                pc.restrict_sh_degree_by_points(
+                    iteration, 
+                    selected_indices=drop_indices,
+                    random_pct=0.0  # 不使用随机，直接用传入的索引
+                )
+            else: print("error!!!")
 
-#         # === Compensation ===
-#         compensation = torch.ones(num_points, device=device)
-#         compensation[drop_mask] = 0.0
+        # === Compensation ===
+        compensation = torch.ones(num_points, device=device)
+        compensation[drop_mask] = 0.0
 
-#         keep_ratio = compensation.mean()
-#         if keep_ratio < 1.0 - 1e-6:
-#             compensation = compensation / (keep_ratio + 1e-7)
+        keep_ratio = compensation.mean()
+        if keep_ratio < 1.0 - 1e-6:
+            compensation = compensation / (keep_ratio + 1e-7)
 
-#         opacity = opacity * compensation.unsqueeze(-1)
+        opacity = opacity * compensation.unsqueeze(-1)
 
 
         # === Debug 日志 ===
